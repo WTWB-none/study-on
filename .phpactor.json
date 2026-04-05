@@ -1,0 +1,10 @@
+{
+    "$schema": "/nix/store/j30sd5yn5zv57cgiib05klflr4937l8w-phpactor-2025.12.21.1/share/php/phpactor/phpactor.schema.json",
+    "symfony.enabled": true,
+    "indexer.exclude_patterns": [
+        "/vendor/**/Tests/**/*",
+        "/vendor/**/tests/**/*",
+        "/var/cache/**/*",
+        "/vendor/composer/**/*"
+    ]
+}
