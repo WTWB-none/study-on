@@ -1,0 +1,20 @@
+.env.local
+.env.*.local
+
+!.env
+!.env.test
+
+/vendor/
+
+/var/cache/
+/var/log/
+/var/sessions/
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###
+
+###> symfony/asset-mapper ###
+/public/assets/
+/assets/vendor/
+###< symfony/asset-mapper ###
