@@ -3,26 +3,37 @@
 {% block title %}Course{% endblock %}
 
 {% block body %}
-    <h1>{{ course.name }}</h1>
+    <div class="container py-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+            <div>
+                <h1 class="mb-2">{{ course.name }}</h1>
+                <p class="mb-0">{{ course.description }}</p>
+            </div>
 
-    <p>{{ course.description }}</p>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-outline-secondary" href="{{ path('app_course_index') }}">Вернуться к списку</a>
+                <a class="btn btn-outline-primary" href="{{ path('app_course_edit', {'id': course.id}) }}">Редактировать</a>
+                <a class="btn btn-primary" href="{{ path('app_lesson_new', {'course_id': course.id}) }}">Добавить урок</a>
+            </div>
+        </div>
 
-    <h2>Уроки</h2>
-    <div class="lesson-list">
-        {% for lesson in course.lessons %}
-            <article>
-                <a href="{{ path('app_lesson_show', {'id': lesson.id}) }}">{{ lesson.name }}</a>
-            </article>
-        {% else %}
-            <p>Уроков пока нет.</p>
-        {% endfor %}
+        <section>
+            <h2 class="mb-3">Уроки</h2>
+
+            <div class="list-group">
+                {% for lesson in course.lessons %}
+                    <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-3" href="{{ path('app_lesson_show', {'id': lesson.id}) }}">
+                        <span>{{ lesson.name }}</span>
+                        <span class="badge text-bg-secondary">Урок {{ lesson.lessonNum }}</span>
+                    </a>
+                {% else %}
+                    <div class="list-group-item text-body-secondary">Уроков пока нет.</div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <div class="mt-4">
+            {{ include('course/_delete_form.html.twig') }}
+        </div>
     </div>
-
-    <p>
-        <a href="{{ path('app_course_index') }}">Вернуться к списку</a>
-        <a href="{{ path('app_course_edit', {'id': course.id}) }}">Редактировать</a>
-        <a href="{{ path('app_lesson_new', {'course_id': course.id}) }}">Добавить урок</a>
-    </p>
-
-    {{ include('course/_delete_form.html.twig') }}
 {% endblock %}

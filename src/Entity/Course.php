@@ -61,7 +61,7 @@ class Course
         return $this->symbolic_code;
     }
 
-    public function setSymbolicCode(string $symbolic_code): static
+    public function setSymbolicCode(?string $symbolic_code): static
     {
         $this->symbolic_code = $symbolic_code;
 
@@ -73,7 +73,7 @@ class Course
         return $this->name;
     }
 
-    public function setName(string $name): static
+    public function setName(?string $name): static
     {
         $this->name = $name;
 
@@ -85,7 +85,7 @@ class Course
         return $this->description;
     }
 
-    public function setDescription(string $description): static
+    public function setDescription(?string $description): static
     {
         $this->description = $description;
 

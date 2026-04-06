@@ -16,7 +16,7 @@ class Lesson
     private ?int $id = null;
 
     #[ORM\ManyToOne(inversedBy: 'lessons')]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: false, onDelete: "CASCADE")]
     #[Assert\NotNull(message: 'Урок должен быть привязан к курсу.')]
     private ?Course $course = null;
 
@@ -63,7 +63,7 @@ class Lesson
         return $this->name;
     }
 
-    public function setName(string $name): static
+    public function setName(?string $name): static
     {
         $this->name = $name;
 
@@ -75,7 +75,7 @@ class Lesson
         return $this->lesson_content;
     }
 
-    public function setLessonContent(string $lesson_content): static
+    public function setLessonContent(?string $lesson_content): static
     {
         $this->lesson_content = $lesson_content;
 
@@ -87,7 +87,7 @@ class Lesson
         return $this->lesson_num;
     }
 
-    public function setLessonNum(int $lesson_num): static
+    public function setLessonNum(?int $lesson_num): static
     {
         $this->lesson_num = $lesson_num;
 

@@ -3,20 +3,29 @@
 {% block title %}Lesson{% endblock %}
 
 {% block body %}
-    <h1>{{ lesson.name }}</h1>
+    <div class="container py-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+            <div>
+                <h1 class="mb-2">{{ lesson.name }}</h1>
+                <p class="mb-0">
+                    Курс:
+                    <a class="text-decoration-none" href="{{ path('app_course_show', {'id': lesson.course.id}) }}">{{ lesson.course.name }}</a>
+                </p>
+            </div>
 
-    <p>
-        Курс:
-        <a href="{{ path('app_course_show', {'id': lesson.course.id}) }}">{{ lesson.course.name }}</a>
-    </p>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-outline-secondary" href="{{ path('app_lesson_index') }}">К урокам</a>
+                <a class="btn btn-outline-primary" href="{{ path('app_lesson_edit', {'id': lesson.id}) }}">Редактировать</a>
+            </div>
+        </div>
 
-    <p>
-        <a href="{{ path('app_lesson_edit', {'id': lesson.id}) }}">Редактировать</a>
-    </p>
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="small text-body-secondary mb-3">Урок №{{ lesson.lessonNum }}</div>
+                <div>{{ lesson.lessonContent|nl2br }}</div>
+            </div>
+        </div>
 
-    <div>
-        {{ lesson.lessonContent|nl2br }}
+        {{ include('lesson/_delete_form.html.twig') }}
     </div>
-
-    {{ include('lesson/_delete_form.html.twig') }}
 {% endblock %}

@@ -18,8 +18,9 @@ services:
       - "127.0.0.1:5432:5432"
     image: postgres:alpine
     volumes:
-      - postgres:/var/lib/postgresql/data
+      - postgres:/var/lib/postgresql/18/docker
     environment:
+      POSTGRES_DB: study_on
       POSTGRES_USER: pguser
       POSTGRES_PASSWORD: pguser
   php:
@@ -31,5 +32,16 @@ services:
       - ${HOME}/.composer:/.composer
     environment:
       - COMPOSER_ALLOW_SUPERUSER=1
+      #- APP_ENV=prod
+      #- APP_DEBUG=0
     links:
       - postgres
+  node:
+    image: node:alpine
+    environment:
+      - YARN_CACHE_FOLDER=/yarn
+    working_dir: /app
+    user: ${UID:-1000}:${GID:-1000}
+    volumes: 
+      - ${PWD}:/app
+      - ${HOME}/.yarn:/yarn
