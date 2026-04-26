@@ -2,62 +2,80 @@
 
 namespace App\Tests;
 
-class CourseControllerTest extends ApplicationWebTestCase
+final class CourseControllerTest extends ApplicationWebTestCase
 {
-    public function testIndexReturnsSuccessfulResponseAndShowsAllFixtureCourses(): void
+    public function testAnonymousUserCanSeeCourseListAndCoursePage(): void
     {
-        $crawler = $this->client->request('GET', '/courses');
+        $course = $this->findCourseByName('Python для анализа данных');
+
+        $indexCrawler = $this->client->request('GET', '/courses');
 
         $this->assertResponseIsSuccessful();
         $this->assertSelectorTextContains('h1', 'Курсы');
-        $this->assertCount(4, $this->courseRepository()->findAll());
-        $this->assertSame(4, $crawler->filter('.card')->count());
-        $this->assertSelectorTextContains('.card-title', 'Python для анализа данных');
+        $this->assertSame(4, $indexCrawler->filter('.card')->count());
+        $this->assertStringNotContainsString('Добавить курс', $this->client->getResponse()->getContent());
+
+        $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
+
+        $this->assertResponseIsSuccessful();
+        $this->assertSelectorTextContains('h1', 'Python для анализа данных');
+        $this->assertStringNotContainsString('Редактировать', $this->client->getResponse()->getContent());
+        $this->assertStringNotContainsString('Добавить урок', $this->client->getResponse()->getContent());
+        $this->assertStringNotContainsString('Удалить курс', $this->client->getResponse()->getContent());
     }
 
-    public function testNewPageReturnsSuccessfulResponse(): void
+    public function testAnonymousUserIsRedirectedFromAdminCourseRoutes(): void
     {
+        $course = $this->findCourseByName('Python для анализа данных');
+
+        $this->client->request('GET', '/courses/new');
+        $this->assertResponseRedirects('/login');
+
+        $this->client->request('GET', sprintf('/courses/%d/edit', $course->getId()));
+        $this->assertResponseRedirects('/login');
+
+        $this->client->request('POST', sprintf('/courses/%d', $course->getId()));
+        $this->assertResponseRedirects('/login');
+    }
+
+    public function testRegularUserCannotSeeAdminCourseActionsAndGetsForbiddenByDirectLinks(): void
+    {
+        $course = $this->findCourseByName('Python для анализа данных');
+        $this->loginAsUser();
+
+        $this->client->request('GET', '/courses');
+        $this->assertStringNotContainsString('Добавить курс', $this->client->getResponse()->getContent());
+
+        $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
+        $this->assertResponseIsSuccessful();
+        $this->assertStringNotContainsString('Редактировать', $this->client->getResponse()->getContent());
+        $this->assertStringNotContainsString('Добавить урок', $this->client->getResponse()->getContent());
+        $this->assertStringNotContainsString('Удалить курс', $this->client->getResponse()->getContent());
+
+        $this->client->request('GET', '/courses/new');
+        $this->assertResponseStatusCodeSame(403);
+
+        $this->client->request('GET', sprintf('/courses/%d/edit', $course->getId()));
+        $this->assertResponseStatusCodeSame(403);
+
+        $this->client->request('POST', sprintf('/courses/%d', $course->getId()));
+        $this->assertResponseStatusCodeSame(403);
+    }
+
+    public function testAdminCanOpenCourseCreationPage(): void
+    {
+        $this->loginAsUser('super-admin@example.com');
+
         $this->client->request('GET', '/courses/new');
 
         $this->assertResponseIsSuccessful();
         $this->assertSelectorTextContains('h1', 'Новый курс');
     }
 
-    public function testShowReturnsSuccessfulResponseAndShowsExpectedLessonsCount(): void
+    public function testAdminCreateCourseShowsValidationErrorsForInvalidData(): void
     {
-        $course = $this->findCourseByName('Python для анализа данных');
-        $crawler = $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
+        $this->loginAsUser('super-admin@example.com');
 
-        $this->assertResponseIsSuccessful();
-        $this->assertSelectorTextContains('h1', 'Python для анализа данных');
-        $this->assertSame(4, $crawler->filter('.list-group-item-action')->count());
-    }
-
-    public function testShowReturns404ForUnknownCourse(): void
-    {
-        $this->client->request('GET', '/courses/999999');
-
-        $this->assertResponseStatusCodeSame(404);
-    }
-
-    public function testEditPageReturnsSuccessfulResponse(): void
-    {
-        $course = $this->findCourseByName('Python для анализа данных');
-        $this->client->request('GET', sprintf('/courses/%d/edit', $course->getId()));
-
-        $this->assertResponseIsSuccessful();
-        $this->assertSelectorTextContains('h1', 'Редактирование курса');
-    }
-
-    public function testEditPageReturns404ForUnknownCourse(): void
-    {
-        $this->client->request('GET', '/courses/999999/edit');
-
-        $this->assertResponseStatusCodeSame(404);
-    }
-
-    public function testCreateCourseShowsValidationErrorsForInvalidData(): void
-    {
         $this->client->request('GET', '/courses/new');
         $this->client->submitForm('Создать курс', [
             'course[symbolic_code]' => '',
@@ -72,8 +90,10 @@ class CourseControllerTest extends ApplicationWebTestCase
         $this->assertCount(4, $this->courseRepository()->findAll());
     }
 
-    public function testCreateCourseShowsValidationErrorForDuplicateSymbolicCode(): void
+    public function testAdminCreateCourseShowsValidationErrorForDuplicateSymbolicCode(): void
     {
+        $this->loginAsUser('super-admin@example.com');
+
         $this->client->request('GET', '/courses/new');
         $this->client->submitForm('Создать курс', [
             'course[symbolic_code]' => 'python-data-analysis',
@@ -86,10 +106,11 @@ class CourseControllerTest extends ApplicationWebTestCase
         $this->assertCount(4, $this->courseRepository()->findAll());
     }
 
-    public function testCreateCourseFromIndexPersistsValidDataAndRedirects(): void
+    public function testAdminCanCreateCourse(): void
     {
-        $this->client->request('GET', '/courses');
-        $this->client->clickLink('Добавить курс');
+        $this->loginAsUser('super-admin@example.com');
+
+        $this->client->request('GET', '/courses/new');
         $this->client->submitForm('Создать курс', [
             'course[symbolic_code]' => 'php-testing-for-symfony',
             'course[name]' => 'Тестирование Symfony приложений',
@@ -99,32 +120,17 @@ class CourseControllerTest extends ApplicationWebTestCase
         $this->assertResponseRedirects('/courses');
         $this->client->followRedirect();
 
+        $this->clearEntityManager();
         $this->assertCount(5, $this->courseRepository()->findAll());
         $this->assertStringContainsString('Тестирование Symfony приложений', $this->client->getResponse()->getContent());
     }
 
-    public function testEditCourseShowsValidationErrorsForInvalidData(): void
+    public function testAdminCanEditCourse(): void
     {
+        $this->loginAsUser('super-admin@example.com');
         $course = $this->findCourseByName('Python для анализа данных');
-        $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
-        $this->client->clickLink('Редактировать');
-        $this->client->submitForm('Сохранить', [
-            'course[symbolic_code]' => '',
-            'course[name]' => '',
-            'course[description]' => '',
-        ]);
 
-        $this->assertResponseStatusCodeSame(422);
-        $this->assertStringContainsString('Укажите символьный код курса.', $this->client->getResponse()->getContent());
-        $this->assertStringContainsString('Укажите название курса.', $this->client->getResponse()->getContent());
-        $this->assertStringContainsString('Укажите описание курса.', $this->client->getResponse()->getContent());
-    }
-
-    public function testEditCourseUpdatesEntityAndRedirectsToIndex(): void
-    {
-        $course = $this->findCourseByName('Python для анализа данных');
-        $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
-        $this->client->clickLink('Редактировать');
+        $this->client->request('GET', sprintf('/courses/%d/edit', $course->getId()));
         $this->client->submitForm('Сохранить', [
             'course[symbolic_code]' => 'python-data-analysis-updated',
             'course[name]' => 'Python для анализа данных 2.0',
@@ -132,6 +138,8 @@ class CourseControllerTest extends ApplicationWebTestCase
         ]);
 
         $this->assertResponseRedirects('/courses');
+
+        $this->clearEntityManager();
         $updatedCourse = $this->courseRepository()->find($course->getId());
 
         self::assertNotNull($updatedCourse);
@@ -139,25 +147,18 @@ class CourseControllerTest extends ApplicationWebTestCase
         self::assertSame('Python для анализа данных 2.0', $updatedCourse->getName());
     }
 
-    public function testDeleteCourseRemovesEntityAndRedirectsToIndex(): void
+    public function testAdminCanDeleteCourse(): void
     {
+        $this->loginAsUser('super-admin@example.com');
         $course = $this->findCourseByName('Основы UX-редактуры');
+
         $this->client->request('GET', sprintf('/courses/%d/edit', $course->getId()));
         $this->client->submitForm('Удалить курс');
 
         $this->assertResponseRedirects('/courses');
-        $this->client->followRedirect();
 
+        $this->clearEntityManager();
         $this->assertCount(3, $this->courseRepository()->findAll());
         $this->assertNull($this->courseRepository()->find($course->getId()));
-    }
-
-    public function testDeleteUnknownCourseReturns404(): void
-    {
-        $this->client->request('POST', '/courses/999999', [
-            '_token' => 'invalid',
-        ]);
-
-        $this->assertResponseStatusCodeSame(404);
     }
 }

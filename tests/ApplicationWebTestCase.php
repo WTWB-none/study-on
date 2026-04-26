@@ -7,6 +7,9 @@ use App\Entity\Course;
 use App\Entity\Lesson;
 use App\Repository\CourseRepository;
 use App\Repository\LessonRepository;
+use App\Security\User;
+use App\Service\BillingClient;
+use App\Tests\Mock\BillingClientMock;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -20,6 +23,9 @@ abstract class ApplicationWebTestCase extends WebTestCase
     {
         self::ensureKernelShutdown();
         $this->client = static::createClient();
+        $this->client->disableReboot();
+        BillingClientMock::reset();
+        static::getContainer()->set(BillingClient::class, new BillingClientMock(''));
         $this->resetDatabase();
     }
 
@@ -49,10 +55,33 @@ abstract class ApplicationWebTestCase extends WebTestCase
         return $lesson;
     }
 
-    private function resetDatabase(): void
+    protected function entityManager(): EntityManagerInterface
     {
         /** @var EntityManagerInterface $entityManager */
         $entityManager = static::getContainer()->get('doctrine')->getManager();
+
+        return $entityManager;
+    }
+
+    protected function loginAsUser(string $email = 'user@example.com'): void
+    {
+        $this->client->loginUser(
+            (new User())
+                ->setEmail($email)
+                ->setApiToken(BillingClientMock::tokenFor($email))
+                ->setRoles(BillingClientMock::rolesFor($email))
+                ->setBalance(BillingClientMock::balanceFor($email))
+        );
+    }
+
+    protected function clearEntityManager(): void
+    {
+        $this->entityManager()->clear();
+    }
+
+    private function resetDatabase(): void
+    {
+        $entityManager = $this->entityManager();
         $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
         $schemaTool = new SchemaTool($entityManager);
 

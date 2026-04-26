@@ -3,10 +3,12 @@
 {% block title %}Course index{% endblock %}
 
 {% block body %}
-    <div class="container py-4">
-        <div class="d-flex justify-content-between align-items-center gap-3 mb-4">
-            <h1 class="mb-0">Курсы</h1>
-            <a class="btn btn-primary" href="{{ path('app_course_new') }}">Добавить курс</a>
+        <div class="container py-4">
+            <div class="d-flex justify-content-between align-items-center gap-3 mb-4">
+                <h1 class="mb-0">Курсы</h1>
+                {% if is_granted('ROLE_SUPER_ADMIN') %}
+                    <a class="btn btn-primary" href="{{ path('app_course_new') }}">Добавить курс</a>
+                {% endif %}
         </div>
 
         <div class="row row-cols-1 row-cols-lg-2 g-3">
@@ -18,7 +20,7 @@
                                 {{ course.name }}
                             </h2>
                             <p class="card-text mb-0">{{ course.description }}</p>
-                        <a class="text-decoration-none" href="{{ path('app_course_show', {'id': course.id}) }}">пройти</a>
+                            <a class="text-decoration-none" href="{{ path('app_course_show', {'id': course.id}) }}">пройти</a>
                         </div>
                     </article>
                 </div>
