@@ -24,3 +24,8 @@ services:
     App\Service\BillingClient:
         arguments:
             $baseUri: '%env(resolve:BILLING_BASE_URI)%'
+
+    App\Security\UserProvider:
+        arguments:
+            $internalAuthSecret: '%env(resolve:BILLING_INTERNAL_AUTH_SECRET)%'
+            $tokenRefreshLeeway: 30

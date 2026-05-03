@@ -8,6 +8,7 @@ class User implements UserInterface
 {
     private ?string $email = null;
     private string $apiToken = '';
+    private string $refreshToken = '';
     private float $balance = 0.0;
 
     /**
@@ -67,6 +68,18 @@ class User implements UserInterface
     public function setApiToken(string $token): static
     {
         $this->apiToken = $token;
+
+        return $this;
+    }
+
+    public function getRefreshToken(): string
+    {
+        return $this->refreshToken;
+    }
+
+    public function setRefreshToken(string $refreshToken): static
+    {
+        $this->refreshToken = $refreshToken;
 
         return $this;
     }

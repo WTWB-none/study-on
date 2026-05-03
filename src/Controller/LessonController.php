@@ -7,7 +7,10 @@ use App\Entity\Lesson;
 use App\Form\LessonType;
 use App\Repository\CourseRepository;
 use App\Repository\LessonRepository;
+use App\Security\User;
+use App\Service\BillingCourseService;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -68,8 +71,26 @@ final class LessonController extends AbstractController
 
     #[Route('/{id}', name: 'app_lesson_show', methods: ['GET'])]
     #[IsGranted('ROLE_USER')]
-    public function show(Lesson $lesson): Response
+    public function show(Lesson $lesson, BillingCourseService $billingCourseService): Response
     {
+        if (!$this->isGranted('ROLE_SUPER_ADMIN')) {
+            $user = $this->getUser();
+
+            if (!$user instanceof User) {
+                throw $this->createAccessDeniedException();
+            }
+
+            try {
+                $courseAccess = $billingCourseService->getCourseAccessInfo($user, $lesson->getCourse()?->getSymbolicCode() ?? '');
+            } catch (\App\Exception\BillingUnavailableException) {
+                throw new ServiceUnavailableHttpException(null, 'Сервис временно недоступен');
+            }
+
+            if (!$courseAccess['has_access']) {
+                throw $this->createAccessDeniedException('Курс еще не оплачен.');
+            }
+        }
+
         return $this->render('lesson/show.html.twig', [
             'lesson' => $lesson,
         ]);

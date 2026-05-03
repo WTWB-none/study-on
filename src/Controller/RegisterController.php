@@ -96,6 +96,14 @@ final class RegisterController extends AbstractController
                 ]);
             }
 
+            if (!isset($payload['refresh_token']) || !is_string($payload['refresh_token']) || $payload['refresh_token'] === '') {
+                $form->addError(new \Symfony\Component\Form\FormError('Некорректный ответ сервиса регистрации.'));
+
+                return $this->render('security/register.html.twig', [
+                    'registrationForm' => $form,
+                ]);
+            }
+
             $roles = $payload['roles'] ?? [];
 
             if (!is_array($roles)) {
@@ -105,6 +113,7 @@ final class RegisterController extends AbstractController
             $user = (new User())
                 ->setEmail($dto->email)
                 ->setApiToken($payload['token'])
+                ->setRefreshToken($payload['refresh_token'])
                 ->setRoles(array_values(array_filter($roles, 'is_string')))
                 ->setBalance(0.0);
 

@@ -22,14 +22,14 @@ final class LessonControllerTest extends ApplicationWebTestCase
 
     public function testRegularUserCanOpenLessonContentButCannotManageLessons(): void
     {
-        $lesson = $this->findLessonByName('Подготовка окружения аналитика');
+        $lesson = $this->findLessonByName('Что делает текст в интерфейсе полезным');
         $this->loginAsUser();
 
         $this->client->request('GET', sprintf('/lessons/%d', $lesson->getId()));
 
         $this->assertResponseIsSuccessful();
-        $this->assertSelectorTextContains('h1', 'Подготовка окружения аналитика');
-        $this->assertStringContainsString('настроить виртуальное окружение', $this->client->getResponse()->getContent());
+        $this->assertSelectorTextContains('h1', 'Что делает текст в интерфейсе полезным');
+        $this->assertStringContainsString('интерфейсные формулировки отличаются', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Редактировать', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Удалить урок', $this->client->getResponse()->getContent());
 
@@ -41,6 +41,31 @@ final class LessonControllerTest extends ApplicationWebTestCase
 
         $this->client->request('POST', sprintf('/lessons/%d', $lesson->getId()));
         $this->assertResponseStatusCodeSame(403);
+    }
+
+    public function testRegularUserCannotOpenLessonFromUnpaidCourse(): void
+    {
+        $lesson = $this->findLessonByName('Подготовка окружения аналитика');
+        $this->loginAsUser();
+
+        $this->client->request('GET', sprintf('/lessons/%d', $lesson->getId()));
+
+        $this->assertResponseStatusCodeSame(403);
+    }
+
+    public function testRegularUserCanOpenLessonAfterCoursePayment(): void
+    {
+        $course = $this->findCourseByName('Python для анализа данных');
+        $lesson = $this->findLessonByName('Подготовка окружения аналитика');
+        $this->loginAsUser();
+
+        $this->client->request('GET', sprintf('/courses/%d/pay', $course->getId()));
+        $this->client->followRedirect();
+
+        $this->client->request('GET', sprintf('/lessons/%d', $lesson->getId()));
+
+        $this->assertResponseIsSuccessful();
+        $this->assertStringContainsString('настроить виртуальное окружение', $this->client->getResponse()->getContent());
     }
 
     public function testAdminCanOpenLessonCreationPage(): void

@@ -13,12 +13,15 @@ final class CourseControllerTest extends ApplicationWebTestCase
         $this->assertResponseIsSuccessful();
         $this->assertSelectorTextContains('h1', 'Курсы');
         $this->assertSame(4, $indexCrawler->filter('.card')->count());
+        $this->assertStringNotContainsString('Аренда · 99.90', $this->client->getResponse()->getContent());
+        $this->assertStringNotContainsString('Покупка · 159.00', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Добавить курс', $this->client->getResponse()->getContent());
 
         $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
 
         $this->assertResponseIsSuccessful();
         $this->assertSelectorTextContains('h1', 'Python для анализа данных');
+        $this->assertStringContainsString('Аренда за 99.90', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Редактировать', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Добавить урок', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Удалить курс', $this->client->getResponse()->getContent());
@@ -44,10 +47,12 @@ final class CourseControllerTest extends ApplicationWebTestCase
         $this->loginAsUser();
 
         $this->client->request('GET', '/courses');
+        $this->assertStringContainsString('Аренда · 99.90', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Добавить курс', $this->client->getResponse()->getContent());
 
         $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
         $this->assertResponseIsSuccessful();
+        $this->assertStringContainsString('Арендовать', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Редактировать', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Добавить урок', $this->client->getResponse()->getContent());
         $this->assertStringNotContainsString('Удалить курс', $this->client->getResponse()->getContent());
@@ -60,6 +65,47 @@ final class CourseControllerTest extends ApplicationWebTestCase
 
         $this->client->request('POST', sprintf('/courses/%d', $course->getId()));
         $this->assertResponseStatusCodeSame(403);
+    }
+
+    public function testUserCanPayForCourseAndSeeActiveAccessStatus(): void
+    {
+        $course = $this->findCourseByName('Python для анализа данных');
+        $this->loginAsUser();
+
+        $this->client->request('GET', sprintf('/courses/%d/pay', $course->getId()));
+
+        $this->assertResponseRedirects(sprintf('/courses/%d', $course->getId()));
+        $this->client->followRedirect();
+
+        $this->assertStringContainsString('Курс успешно оплачен', $this->client->getResponse()->getContent());
+        $this->assertStringContainsString('Арендовано до', $this->client->getResponse()->getContent());
+        $this->assertStringNotContainsString('Арендовать', $this->client->getResponse()->getContent());
+    }
+
+    public function testUserSeesBillingErrorWhenCoursePaymentFails(): void
+    {
+        $course = $this->findCourseByName('SQL для продакт-менеджеров');
+        $this->loginAsUser();
+
+        $this->client->request('GET', sprintf('/courses/%d', $course->getId()));
+        $this->assertSelectorExists('button[disabled]');
+
+        $this->client->request('GET', sprintf('/courses/%d/pay', $course->getId()));
+
+        $this->assertResponseRedirects(sprintf('/courses/%d', $course->getId()));
+        $this->client->followRedirect();
+
+        $this->assertStringContainsString('На вашем счету недостаточно средств', $this->client->getResponse()->getContent());
+    }
+
+    public function testCourseListShowsBoughtAndRentedStatusesForAuthorizedUser(): void
+    {
+        $this->loginAsUser('super-admin@example.com');
+
+        $this->client->request('GET', '/courses');
+
+        $this->assertStringContainsString('Бесплатно', $this->client->getResponse()->getContent());
+        $this->assertStringContainsString('Покупка · 79.00', $this->client->getResponse()->getContent());
     }
 
     public function testAdminCanOpenCourseCreationPage(): void

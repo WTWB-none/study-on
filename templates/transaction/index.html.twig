@@ -1,0 +1,101 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}История транзакций{% endblock %}
+
+{% block body %}
+    <div class="container py-4">
+        <div class="d-flex justify-content-between align-items-center gap-3 mb-4">
+            <h1 class="mb-0">История транзакций</h1>
+            <a class="btn btn-outline-secondary" href="{{ path('app_profile') }}">К профилю</a>
+        </div>
+
+        {% if billing_unavailable %}
+            <div class="alert alert-warning">Сервис временно недоступен</div>
+        {% else %}
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <form class="row g-3 mb-4" method="get">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label" for="type">Тип</label>
+                            <select class="form-select" id="type" name="type">
+                                <option value="">Все</option>
+                                <option value="payment" {% if transaction_filters.type == 'payment' %}selected{% endif %}>Списание</option>
+                                <option value="deposit" {% if transaction_filters.type == 'deposit' %}selected{% endif %}>Пополнение</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label" for="course_code">Код курса</label>
+                            <input class="form-control" id="course_code" name="course_code" type="text" value="{{ transaction_filters.course_code }}">
+                        </div>
+
+                        <div class="col-12 col-md-4 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" id="skip_expired" name="skip_expired" type="checkbox" value="1" {% if transaction_filters.skip_expired %}checked{% endif %}>
+                                <label class="form-check-label" for="skip_expired">Скрыть истекшие аренды</label>
+                            </div>
+                        </div>
+
+                        <div class="col-12 d-flex gap-2">
+                            <button class="btn btn-primary" type="submit">Применить</button>
+                            <a class="btn btn-outline-secondary" href="{{ path('app_transaction_index') }}">Сбросить</a>
+                        </div>
+                    </form>
+
+                    <div class="table-responsive">
+                        <table class="table align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Дата</th>
+                                    <th>Тип</th>
+                                    <th>Курс</th>
+                                    <th>Сумма</th>
+                                    <th>Доступ до</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for transaction in transactions %}
+                                    <tr>
+                                        <td>{{ transaction.id }}</td>
+                                        <td>{{ transaction.created_at|date('d.m.Y H:i') }}</td>
+                                        <td>
+                                            {% if transaction.type == 'payment' %}
+                                                Списание
+                                            {% else %}
+                                                Пополнение
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if transaction.course_code and courses_by_code[transaction.course_code] is defined %}
+                                                <a href="{{ path('app_course_show', {'id': courses_by_code[transaction.course_code].id}) }}">
+                                                    {{ courses_by_code[transaction.course_code].name }}
+                                                </a>
+                                            {% elseif transaction.course_code %}
+                                                {{ transaction.course_code }}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ transaction.amount }}</td>
+                                        <td>
+                                            {% if transaction.expires_at %}
+                                                {{ transaction.expires_at|date('d.m.Y H:i') }}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% else %}
+                                    <tr>
+                                        <td class="text-body-secondary text-center" colspan="6">Операций не найдено.</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

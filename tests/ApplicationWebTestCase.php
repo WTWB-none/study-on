@@ -69,6 +69,7 @@ abstract class ApplicationWebTestCase extends WebTestCase
             (new User())
                 ->setEmail($email)
                 ->setApiToken(BillingClientMock::tokenFor($email))
+                ->setRefreshToken(BillingClientMock::refreshTokenFor($email))
                 ->setRoles(BillingClientMock::rolesFor($email))
                 ->setBalance(BillingClientMock::balanceFor($email))
         );

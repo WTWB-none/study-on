@@ -21,7 +21,10 @@
                             <dd class="col-sm-8">{{ role_label }}</dd>
 
                             <dt class="col-sm-4">Баланс</dt>
-                            <dd class="col-sm-8">{{ user.balance|number_format(2, '.', ' ') }}</dd>
+                            <dd class="col-sm-8 d-flex flex-wrap align-items-center gap-3">
+                                <span>{{ user.balance|number_format(2, '.', ' ') }}</span>
+                                <a href="{{ path('app_transaction_index') }}">История транзакций</a>
+                            </dd>
                         </dl>
                     </div>
                 </div>

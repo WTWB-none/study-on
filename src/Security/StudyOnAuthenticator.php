@@ -59,6 +59,10 @@ class StudyOnAuthenticator extends AbstractLoginFormAuthenticator
                 throw new CustomUserMessageAuthenticationException('Некорректный ответ сервиса авторизации.');
             }
 
+            if (!isset($payload['refresh_token']) || !is_string($payload['refresh_token']) || $payload['refresh_token'] === '') {
+                throw new CustomUserMessageAuthenticationException('Некорректный ответ сервиса авторизации.');
+            }
+
             $roles = $payload['roles'] ?? [];
 
             if (!is_array($roles)) {
@@ -68,6 +72,7 @@ class StudyOnAuthenticator extends AbstractLoginFormAuthenticator
             return (new User())
                 ->setEmail($identifier)
                 ->setApiToken($payload['token'])
+                ->setRefreshToken($payload['refresh_token'])
                 ->setRoles(array_values(array_filter($roles, 'is_string')));
         };
 

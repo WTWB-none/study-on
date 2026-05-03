@@ -4,6 +4,10 @@
 
 {% block body %}
         <div class="container py-4">
+            {% if billing_unavailable %}
+                <div class="alert alert-warning">Сервис временно недоступен</div>
+            {% endif %}
+
             <div class="d-flex justify-content-between align-items-center gap-3 mb-4">
                 <h1 class="mb-0">Курсы</h1>
                 {% if is_granted('ROLE_SUPER_ADMIN') %}
@@ -13,14 +17,34 @@
 
         <div class="row row-cols-1 row-cols-lg-2 g-3">
             {% for course in courses %}
+                {% set billingCourse = billing_courses[course.symbolicCode] ?? null %}
+                {% set isFreeCourse = billingCourse is null or billingCourse.type == 'free' %}
+                {% set courseAccess = course_access_map[course.symbolicCode] ?? null %}
                 <div class="col">
                     <article class="card h-100 shadow-sm">
                         <div class="card-body">
-                            <h2 class="h4 card-title">
-                                {{ course.name }}
-                            </h2>
+                            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                <h2 class="h4 card-title mb-0">{{ course.name }}</h2>
+                                {% if app.user %}
+                                    <span class="badge text-bg-light border">
+                                        {% if courseAccess %}
+                                            {% if courseAccess.expires_at %}
+                                                Арендовано до {{ courseAccess.expires_at|date('d.m.Y H:i') }}
+                                            {% else %}
+                                                Куплено
+                                            {% endif %}
+                                        {% elseif isFreeCourse %}
+                                            Бесплатно
+                                        {% elseif billingCourse.type == 'rent' %}
+                                            Аренда · {{ billingCourse.price }}
+                                        {% else %}
+                                            Покупка · {{ billingCourse.price }}
+                                        {% endif %}
+                                    </span>
+                                {% endif %}
+                            </div>
                             <p class="card-text mb-0">{{ course.description }}</p>
-                            <a class="text-decoration-none" href="{{ path('app_course_show', {'id': course.id}) }}">пройти</a>
+                            <a class="text-decoration-none" href="{{ path('app_course_show', {'id': course.id}) }}">Подробнее</a>
                         </div>
                     </article>
                 </div>

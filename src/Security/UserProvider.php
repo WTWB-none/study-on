@@ -3,6 +3,7 @@
 namespace App\Security;
 
 use App\Exception\BillingUnavailableException;
+use App\Service\BillingJwtPayloadDecoder;
 use App\Service\BillingClient;
 use Symfony\Component\Security\Core\Exception\UnsupportedUserException;
 use Symfony\Component\Security\Core\Exception\UserNotFoundException;
@@ -15,6 +16,9 @@ class UserProvider implements UserProviderInterface, PasswordUpgraderInterface
 {
     public function __construct(
         private readonly BillingClient $billingClient,
+        private readonly BillingJwtPayloadDecoder $billingJwtPayloadDecoder,
+        private readonly string $internalAuthSecret,
+        private readonly int $tokenRefreshLeeway = 30,
     ) {
     }
 
@@ -36,7 +40,17 @@ class UserProvider implements UserProviderInterface, PasswordUpgraderInterface
             throw $exception;
         }
 
-        return (new User())->setEmail($identifier);
+        try {
+            $payload = $this->billingClient->post('/api/v1/auth/remember', [
+                'username' => $identifier,
+            ], [
+                'X-Internal-Auth-Secret' => $this->internalAuthSecret,
+            ]);
+        } catch (BillingUnavailableException $exception) {
+            throw new UserNotFoundException('Unable to restore user from billing service.', previous: $exception);
+        }
+
+        return $this->createUserFromBillingPayload($payload, $identifier);
     }
 
     /**
@@ -64,11 +78,16 @@ class UserProvider implements UserProviderInterface, PasswordUpgraderInterface
             throw new UnsupportedUserException(sprintf('Invalid user class "%s".', $user::class));
         }
 
+        if ($this->shouldRefreshAccessToken($user->getApiToken())) {
+            $user = $this->refreshAccessToken($user);
+        }
+
         $token = $user->getApiToken();
 
         if ($token === '') {
             return (new User())
                 ->setEmail($user->getUserIdentifier())
+                ->setRefreshToken($user->getRefreshToken())
                 ->setRoles($user->getRoles())
                 ->setBalance($user->getBalance());
         }
@@ -99,11 +118,7 @@ class UserProvider implements UserProviderInterface, PasswordUpgraderInterface
             $balance = 0.0;
         }
 
-        return (new User())
-            ->setEmail($payload['username'])
-            ->setApiToken($token)
-            ->setRoles(array_values(array_filter($roles, 'is_string')))
-            ->setBalance((float) $balance);
+        return $this->createUserFromBillingPayload($payload, $user->getUserIdentifier(), $token, $user->getRefreshToken());
     }
 
     /**
@@ -122,5 +137,111 @@ class UserProvider implements UserProviderInterface, PasswordUpgraderInterface
         // TODO: when hashed passwords are in use, this method should:
         // 1. persist the new password in the user storage
         // 2. update the $user object with $user->setPassword($newHashedPassword);
+    }
+
+    /**
+     * @param mixed $payload
+     */
+    private function createUserFromBillingPayload(
+        mixed $payload,
+        string $identifier,
+        ?string $fallbackToken = null,
+        ?string $fallbackRefreshToken = null,
+    ): User
+    {
+        if (
+            !is_array($payload)
+            || !isset($payload['username'])
+            || !is_string($payload['username'])
+            || $payload['username'] === ''
+        ) {
+            $exception = new UserNotFoundException('Billing service returned an invalid user payload.');
+            $exception->setUserIdentifier($identifier);
+
+            throw $exception;
+        }
+
+        $token = $fallbackToken;
+
+        if ($token === null) {
+            if (!isset($payload['token']) || !is_string($payload['token']) || $payload['token'] === '') {
+                $exception = new UserNotFoundException('Billing service returned an invalid user payload.');
+                $exception->setUserIdentifier($identifier);
+
+                throw $exception;
+            }
+
+            $token = $payload['token'];
+        }
+
+        $refreshToken = $fallbackRefreshToken;
+
+        if ($refreshToken === null) {
+            if (!isset($payload['refresh_token']) || !is_string($payload['refresh_token']) || $payload['refresh_token'] === '') {
+                $exception = new UserNotFoundException('Billing service returned an invalid user payload.');
+                $exception->setUserIdentifier($identifier);
+
+                throw $exception;
+            }
+
+            $refreshToken = $payload['refresh_token'];
+        }
+
+        $roles = $payload['roles'] ?? [];
+        $balance = $payload['balance'] ?? 0.0;
+
+        if (!is_array($roles)) {
+            $roles = [];
+        }
+
+        if (!is_numeric($balance)) {
+            $balance = 0.0;
+        }
+
+        return (new User())
+            ->setEmail($payload['username'])
+            ->setApiToken($token)
+            ->setRefreshToken($refreshToken)
+            ->setRoles(array_values(array_filter($roles, 'is_string')))
+            ->setBalance((float) $balance);
+    }
+
+    private function shouldRefreshAccessToken(string $token): bool
+    {
+        $payload = $this->billingJwtPayloadDecoder->decode($token);
+
+        if (!is_array($payload)) {
+            return false;
+        }
+
+        $expiresAt = $payload['exp'] ?? null;
+
+        if (!is_int($expiresAt) && !is_numeric($expiresAt)) {
+            return false;
+        }
+
+        return (int) $expiresAt <= time() + $this->tokenRefreshLeeway;
+    }
+
+    private function refreshAccessToken(User $user): User
+    {
+        $refreshToken = $user->getRefreshToken();
+
+        if ($refreshToken === '') {
+            $exception = new UserNotFoundException('Refresh token is missing.');
+            $exception->setUserIdentifier($user->getUserIdentifier());
+
+            throw $exception;
+        }
+
+        try {
+            $payload = $this->billingClient->post('/api/v1/token/refresh', [
+                'refresh_token' => $refreshToken,
+            ]);
+        } catch (BillingUnavailableException $exception) {
+            throw new UserNotFoundException('Unable to refresh access token via billing service.', previous: $exception);
+        }
+
+        return $this->createUserFromBillingPayload($payload, $user->getUserIdentifier());
     }
 }

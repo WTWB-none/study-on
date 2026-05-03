@@ -7,10 +7,26 @@ use App\Service\BillingClient;
 
 class BillingClientMock extends BillingClient
 {
+    private const INTERNAL_AUTH_SECRET = 'study-on-internal-auth-secret';
+    private const ACCESS_TOKEN_TTL = 3600;
+    private const RENT_DURATION_DAYS = 7;
+
     /**
      * @var array<string, array{password: string, roles: list<string>, balance: float}>
      */
     private static array $users = [];
+
+    /**
+     * @var array<string, array{code: string, type: string, price?: string}>
+     */
+    private static array $courses = [];
+
+    /**
+     * @var array<string, list<array{id: int, created_at: string, type: string, amount: string, course_code?: string, expires_at?: string}>>
+     */
+    private static array $transactions = [];
+
+    private static int $nextTransactionId = 1;
 
     /**
      * @var array<string, bool>
@@ -31,6 +47,36 @@ class BillingClientMock extends BillingClient
                 'balance' => 999.99,
             ],
         ];
+        self::$courses = [
+            'python-data-analysis' => [
+                'code' => 'python-data-analysis',
+                'type' => 'rent',
+                'price' => '99.90',
+            ],
+            'ux-writing-basics' => [
+                'code' => 'ux-writing-basics',
+                'type' => 'free',
+            ],
+            'sql-for-product-managers' => [
+                'code' => 'sql-for-product-managers',
+                'type' => 'buy',
+                'price' => '159.00',
+            ],
+            'project-management-essentials' => [
+                'code' => 'project-management-essentials',
+                'type' => 'buy',
+                'price' => '79.00',
+            ],
+        ];
+        self::$transactions = [];
+        self::$nextTransactionId = 1;
+
+        foreach (self::$users as $email => $user) {
+            self::$transactions[$email] = [
+                self::createTransaction('deposit', number_format($user['balance'], 2, '.', '')),
+            ];
+        }
+
         self::$unavailablePaths = [];
     }
 
@@ -46,7 +92,17 @@ class BillingClientMock extends BillingClient
 
     public static function tokenFor(string $email): string
     {
-        return 'token_'.md5($email);
+        return self::tokenForWithTtl($email, self::ACCESS_TOKEN_TTL);
+    }
+
+    public static function expiredTokenFor(string $email): string
+    {
+        return self::tokenForWithTtl($email, -60);
+    }
+
+    public static function refreshTokenFor(string $email): string
+    {
+        return 'refresh_'.md5($email);
     }
 
     public static function makeUnavailable(string $path): void
@@ -56,36 +112,36 @@ class BillingClientMock extends BillingClient
 
     public function get(string $path, array $data = [], array $headers = []): mixed
     {
+        if ([] !== $data) {
+            $separator = str_contains($path, '?') ? '&' : '?';
+            $path .= $separator.http_build_query($data);
+        }
+
         $this->guardAvailability($path);
 
-        if ($path !== '/api/v1/users/current') {
-            return ['message' => 'Unknown billing endpoint.'];
-        }
+        $pathInfo = $this->parsePath($path);
 
-        $authorization = $headers['Authorization'] ?? '';
-        $token = str_starts_with($authorization, 'Bearer ') ? substr($authorization, 7) : '';
-        $email = $this->emailByToken($token);
-
-        if ($email === null) {
-            return ['message' => 'Invalid token.'];
-        }
-
-        $user = self::$users[$email];
-
-        return [
-            'username' => $email,
-            'roles' => $user['roles'],
-            'balance' => $user['balance'],
-        ];
+        return match (true) {
+            $pathInfo['path'] === '/api/v1/users/current' => $this->currentUser($headers),
+            $pathInfo['path'] === '/api/v1/courses' => array_values(self::$courses),
+            preg_match('#^/api/v1/courses/([^/]+)$#', $pathInfo['path'], $matches) === 1 => self::$courses[$matches[1]] ?? ['message' => 'Course not found.'],
+            $pathInfo['path'] === '/api/v1/transactions' => $this->transactions($headers, $pathInfo['query']),
+            default => ['message' => 'Unknown billing endpoint.'],
+        };
     }
 
     public function post(string $path, array $data = [], array $headers = []): mixed
     {
         $this->guardAvailability($path);
 
-        return match ($path) {
-            '/api/v1/auth' => $this->authenticate($data),
-            '/api/v1/register' => $this->register($data),
+        $pathInfo = $this->parsePath($path);
+
+        return match (true) {
+            $pathInfo['path'] === '/api/v1/auth' => $this->authenticate($data),
+            $pathInfo['path'] === '/api/v1/auth/remember' => $this->authenticateRememberMe($data, $headers),
+            $pathInfo['path'] === '/api/v1/token/refresh' => $this->refreshAccessToken($data),
+            $pathInfo['path'] === '/api/v1/register' => $this->register($data),
+            preg_match('#^/api/v1/courses/([^/]+)/pay$#', $pathInfo['path'], $matches) === 1 => $this->payCourse($matches[1], $headers),
             default => ['message' => 'Unknown billing endpoint.'],
         };
     }
@@ -106,7 +162,35 @@ class BillingClientMock extends BillingClient
 
         return [
             'token' => self::tokenFor($email),
+            'refresh_token' => self::refreshTokenFor($email),
             'roles' => self::$users[$email]['roles'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, string> $headers
+     *
+     * @return array<string, mixed>
+     */
+    private function authenticateRememberMe(array $data, array $headers): array
+    {
+        if (($headers['X-Internal-Auth-Secret'] ?? '') !== self::INTERNAL_AUTH_SECRET) {
+            return ['message' => 'Invalid internal auth secret.'];
+        }
+
+        $email = (string) ($data['username'] ?? '');
+
+        if (!isset(self::$users[$email])) {
+            return ['message' => 'User not found.'];
+        }
+
+        return [
+            'username' => $email,
+            'token' => self::tokenFor($email),
+            'refresh_token' => self::refreshTokenFor($email),
+            'roles' => self::$users[$email]['roles'],
+            'balance' => self::$users[$email]['balance'],
         ];
     }
 
@@ -140,7 +224,159 @@ class BillingClientMock extends BillingClient
 
         return [
             'token' => self::tokenFor($email),
+            'refresh_token' => self::refreshTokenFor($email),
             'roles' => ['ROLE_USER'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    private function refreshAccessToken(array $data): array
+    {
+        $refreshToken = (string) ($data['refresh_token'] ?? '');
+        $email = $this->emailByRefreshToken($refreshToken);
+
+        if ($email === null) {
+            return ['message' => 'Invalid refresh token.'];
+        }
+
+        return [
+            'token' => self::tokenFor($email),
+            'refresh_token' => self::refreshTokenFor($email),
+            'roles' => self::$users[$email]['roles'],
+            'username' => $email,
+            'balance' => self::$users[$email]['balance'],
+        ];
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $query
+     *
+     * @return array<string, mixed>|list<array{id: int, created_at: string, type: string, amount: string, course_code?: string, expires_at?: string}>
+     */
+    private function transactions(array $headers, array $query): array
+    {
+        $email = $this->emailFromHeaders($headers);
+
+        if ($email === null) {
+            return ['message' => 'Invalid token.'];
+        }
+
+        $transactions = self::$transactions[$email] ?? [];
+        $filters = $query['filter'] ?? [];
+
+        if (!is_array($filters)) {
+            $filters = [];
+        }
+
+        if (isset($filters['type']) && is_string($filters['type']) && $filters['type'] !== '') {
+            $transactions = array_values(array_filter(
+                $transactions,
+                static fn (array $transaction): bool => $transaction['type'] === $filters['type']
+            ));
+        }
+
+        if (isset($filters['course_code']) && is_string($filters['course_code']) && $filters['course_code'] !== '') {
+            $transactions = array_values(array_filter(
+                $transactions,
+                static fn (array $transaction): bool => ($transaction['course_code'] ?? null) === $filters['course_code']
+            ));
+        }
+
+        if (!empty($filters['skip_expired'])) {
+            $now = new \DateTimeImmutable();
+            $transactions = array_values(array_filter($transactions, static function (array $transaction) use ($now): bool {
+                if (!isset($transaction['expires_at'])) {
+                    return true;
+                }
+
+                return new \DateTimeImmutable($transaction['expires_at']) > $now;
+            }));
+        }
+
+        usort($transactions, static fn (array $left, array $right): int => $right['id'] <=> $left['id']);
+
+        return $transactions;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     *
+     * @return array<string, mixed>
+     */
+    private function currentUser(array $headers): array
+    {
+        $email = $this->emailFromHeaders($headers);
+
+        if ($email === null) {
+            return ['message' => 'Invalid token.'];
+        }
+
+        $user = self::$users[$email];
+
+        return [
+            'username' => $email,
+            'roles' => $user['roles'],
+            'balance' => $user['balance'],
+        ];
+    }
+
+    /**
+     * @param array<string, string> $headers
+     *
+     * @return array<string, mixed>
+     */
+    private function payCourse(string $code, array $headers): array
+    {
+        $email = $this->emailFromHeaders($headers);
+
+        if ($email === null) {
+            return ['message' => 'Invalid token.'];
+        }
+
+        $course = self::$courses[$code] ?? null;
+
+        if ($course === null) {
+            return ['message' => 'Course not found.'];
+        }
+
+        if ($course['type'] === 'free') {
+            return [
+                'success' => true,
+                'course_type' => 'free',
+            ];
+        }
+
+        $price = (float) ($course['price'] ?? 0.0);
+
+        if (self::$users[$email]['balance'] < $price) {
+            return [
+                'code' => 406,
+                'message' => 'На вашем счету недостаточно средств',
+            ];
+        }
+
+        self::$users[$email]['balance'] -= $price;
+
+        $transaction = self::createTransaction(
+            'payment',
+            number_format($price, 2, '.', ''),
+            $code,
+            $course['type'] === 'rent'
+                ? (new \DateTimeImmutable(sprintf('+%d days', self::RENT_DURATION_DAYS)))->format(DATE_ATOM)
+                : null
+        );
+
+        self::$transactions[$email][] = $transaction;
+
+        return [
+            'success' => true,
+            'course_type' => $course['type'],
+            'expires_at' => $transaction['expires_at'] ?? null,
         ];
     }
 
@@ -154,11 +390,113 @@ class BillingClientMock extends BillingClient
     private function emailByToken(string $token): ?string
     {
         foreach (array_keys(self::$users) as $email) {
-            if (self::tokenFor($email) === $token) {
+            $payload = $this->decodeTokenPayload($token);
+
+            if ($payload !== null && ($payload['username'] ?? null) === $email) {
                 return $email;
             }
         }
 
         return null;
+    }
+
+    private function emailByRefreshToken(string $refreshToken): ?string
+    {
+        foreach (array_keys(self::$users) as $email) {
+            if (self::refreshTokenFor($email) === $refreshToken) {
+                return $email;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function emailFromHeaders(array $headers): ?string
+    {
+        $authorization = $headers['Authorization'] ?? '';
+        $token = str_starts_with($authorization, 'Bearer ') ? substr($authorization, 7) : '';
+
+        return $this->emailByToken($token);
+    }
+
+    /**
+     * @return array{path: string, query: array<string, mixed>}
+     */
+    private function parsePath(string $path): array
+    {
+        $parts = parse_url($path);
+        $query = [];
+
+        if (isset($parts['query']) && is_string($parts['query'])) {
+            parse_str($parts['query'], $query);
+        }
+
+        return [
+            'path' => $parts['path'] ?? $path,
+            'query' => $query,
+        ];
+    }
+
+    private static function tokenForWithTtl(string $email, int $ttl): string
+    {
+        $header = self::base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
+        $payload = self::base64UrlEncode(json_encode([
+            'iat' => time(),
+            'exp' => time() + $ttl,
+            'roles' => self::rolesFor($email),
+            'username' => $email,
+        ], JSON_THROW_ON_ERROR));
+
+        return sprintf('%s.%s.%s', $header, $payload, md5($email.$ttl));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeTokenPayload(string $token): ?array
+    {
+        $parts = explode('.', $token);
+
+        if (count($parts) !== 3) {
+            return null;
+        }
+
+        $payload = base64_decode(strtr($parts[1], '-_', '+/'), true);
+
+        if (!is_string($payload)) {
+            return null;
+        }
+
+        $decoded = json_decode($payload, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private static function base64UrlEncode(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    private static function createTransaction(string $type, string $amount, ?string $courseCode = null, ?string $expiresAt = null): array
+    {
+        $transaction = [
+            'id' => self::$nextTransactionId++,
+            'created_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            'type' => $type,
+            'amount' => $amount,
+        ];
+
+        if ($courseCode !== null) {
+            $transaction['course_code'] = $courseCode;
+        }
+
+        if ($expiresAt !== null) {
+            $transaction['expires_at'] = $expiresAt;
+        }
+
+        return $transaction;
     }
 }
