@@ -2,6 +2,8 @@
 
 namespace App\Service;
 
+use App\Entity\Course;
+use App\Exception\BillingCourseSyncException;
 use App\Exception\BillingUnavailableException;
 use App\Security\User;
 
@@ -148,6 +150,36 @@ final class BillingCourseService
         return $payload;
     }
 
+    public function createCourse(User $user, Course $course): void
+    {
+        $payload = $this->sendCourseUpsertRequest(
+            fn (): mixed => $this->billingClient->post(
+                '/api/v1/courses',
+                $this->coursePayload($course),
+                $this->authorizationHeaders($user)
+            ),
+        );
+
+        if (($payload['success'] ?? false) !== true) {
+            throw new BillingCourseSyncException('Не удалось создать курс в биллинге.');
+        }
+    }
+
+    public function updateCourse(User $user, string $currentCode, Course $course): void
+    {
+        $payload = $this->sendCourseUpsertRequest(
+            fn (): mixed => $this->billingClient->post(
+                '/api/v1/courses/'.$currentCode,
+                $this->coursePayload($course),
+                $this->authorizationHeaders($user)
+            ),
+        );
+
+        if (($payload['success'] ?? false) !== true) {
+            throw new BillingCourseSyncException('Не удалось обновить курс в биллинге.');
+        }
+    }
+
     /**
      * @return array<string, array{id: int, created_at: string, type: string, amount: string, course_code: ?string, expires_at: ?string}>
      */
@@ -268,6 +300,95 @@ final class BillingCourseService
         }
 
         return $query;
+    }
+
+    /**
+     * @return array{type: string, title: string, code: string, price: ?float}
+     */
+    private function coursePayload(Course $course): array
+    {
+        $type = $course->getType() ?? self::COURSE_TYPE_FREE;
+
+        return [
+            'type' => $type,
+            'title' => $course->getName() ?? '',
+            'code' => $course->getSymbolicCode() ?? '',
+            'price' => $type === self::COURSE_TYPE_FREE ? null : $course->getPrice(),
+        ];
+    }
+
+    /**
+     * @param \Closure(): mixed $request
+     *
+     * @return array<string, mixed>
+     */
+    private function sendCourseUpsertRequest(\Closure $request): array
+    {
+        try {
+            $payload = $request();
+        } catch (BillingUnavailableException $exception) {
+            throw new BillingUnavailableException('Billing service is unavailable.', previous: $exception);
+        }
+
+        if (!is_array($payload)) {
+            throw new BillingUnavailableException('Billing service returned an invalid course upsert response.');
+        }
+
+        if (isset($payload['errors']) && is_array($payload['errors'])) {
+            throw new BillingCourseSyncException(
+                isset($payload['message']) && is_string($payload['message']) && $payload['message'] !== ''
+                    ? $payload['message']
+                    : 'Не удалось синхронизировать курс с биллингом.',
+                $this->normalizeCourseSyncErrors($payload['errors']),
+            );
+        }
+
+        if (isset($payload['message']) && is_string($payload['message']) && $payload['message'] !== '') {
+            throw new BillingCourseSyncException($payload['message']);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param mixed $errors
+     *
+     * @return array<string, list<string>>
+     */
+    private function normalizeCourseSyncErrors(mixed $errors): array
+    {
+        if (!is_array($errors)) {
+            return [];
+        }
+
+        $normalizedErrors = [];
+
+        foreach ($errors as $error) {
+            if (
+                !is_array($error)
+                || !isset($error['field'], $error['message'])
+                || !is_string($error['field'])
+                || !is_string($error['message'])
+                || $error['message'] === ''
+            ) {
+                continue;
+            }
+
+            $field = match ($error['field']) {
+                'code' => 'symbolic_code',
+                'title' => 'name',
+                default => $error['field'],
+            };
+
+            $message = $field === 'symbolic_code' && $error['field'] === 'code'
+                ? 'Символьный код курса должен быть уникальным.'
+                : $error['message'];
+
+            $normalizedErrors[$field] ??= [];
+            $normalizedErrors[$field][] = $message;
+        }
+
+        return $normalizedErrors;
     }
 
     /**

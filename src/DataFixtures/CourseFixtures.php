@@ -15,7 +15,9 @@ class CourseFixtures extends Fixture
             $course = (new Course())
                 ->setSymbolicCode($courseData['symbolic_code'])
                 ->setName($courseData['name'])
-                ->setDescription($courseData['description']);
+                ->setDescription($courseData['description'])
+                ->setType($courseData['type'])
+                ->setPrice($courseData['price']);
 
             $manager->persist($course);
 
@@ -38,6 +40,8 @@ class CourseFixtures extends Fixture
      *     symbolic_code: string,
      *     name: string,
      *     description: string,
+     *     type: string,
+     *     price: ?float,
      *     lessons: array<int, array{
      *         lesson_num: int,
      *         name: string,
@@ -52,6 +56,8 @@ class CourseFixtures extends Fixture
                 'symbolic_code' => 'python-data-analysis',
                 'name' => 'Python для анализа данных',
                 'description' => 'Практический курс для тех, кто хочет научиться уверенно работать с таблицами, очищать данные, строить простые отчеты и автоматизировать рутинную аналитику на Python.',
+                'type' => 'rent',
+                'price' => 99.90,
                 'lessons' => [
                     [
                         'lesson_num' => 1,
@@ -79,6 +85,8 @@ class CourseFixtures extends Fixture
                 'symbolic_code' => 'ux-writing-basics',
                 'name' => 'Основы UX-редактуры',
                 'description' => 'Курс для дизайнеров, продакт-менеджеров и редакторов, которым важно писать понятные интерфейсные тексты без канцелярита и лишней сложности.',
+                'type' => 'free',
+                'price' => null,
                 'lessons' => [
                     [
                         'lesson_num' => 1,
@@ -111,6 +119,8 @@ class CourseFixtures extends Fixture
                 'symbolic_code' => 'sql-for-product-managers',
                 'name' => 'SQL для продакт-менеджеров',
                 'description' => 'Интенсив по SQL для специалистов, которым нужно самостоятельно отвечать на продуктовые вопросы, не дожидаясь отдельной выгрузки от аналитиков.',
+                'type' => 'buy',
+                'price' => 159.00,
                 'lessons' => [
                     [
                         'lesson_num' => 1,
@@ -138,6 +148,8 @@ class CourseFixtures extends Fixture
                 'symbolic_code' => 'project-management-essentials',
                 'name' => 'Управление проектами: базовый курс',
                 'description' => 'Вводный курс для тимлидов и начинающих менеджеров, которые хотят выстроить понятный процесс планирования, коммуникации и контроля сроков.',
+                'type' => 'buy',
+                'price' => 79.00,
                 'lessons' => [
                     [
                         'lesson_num' => 1,

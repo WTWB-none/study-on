@@ -3,12 +3,15 @@
 namespace App\Controller;
 
 use App\Entity\Course;
+use App\Exception\BillingCourseSyncException;
+use App\Exception\BillingUnavailableException;
 use App\Form\CourseType;
 use App\Repository\CourseRepository;
 use App\Security\User;
 use App\Service\BillingCourseService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Form\FormError;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -45,11 +48,29 @@ final class CourseController extends AbstractController
 
     #[Route('/new', name: 'app_course_new', methods: ['GET', 'POST'])]
     #[IsGranted('ROLE_SUPER_ADMIN')]
-    public function new(Request $request, EntityManagerInterface $entityManager): Response
+    public function new(Request $request, EntityManagerInterface $entityManager, BillingCourseService $billingCourseService): Response
     {
         $course = new Course();
         $form = $this->createForm(CourseType::class, $course);
         $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $user = $this->getUser();
+
+            if (!$user instanceof User) {
+                throw $this->createAccessDeniedException();
+            }
+
+            $this->normalizeBillingFields($course);
+
+            try {
+                $billingCourseService->createCourse($user, $course);
+            } catch (BillingCourseSyncException $exception) {
+                $this->addBillingErrorsToForm($form, $exception);
+            } catch (BillingUnavailableException) {
+                $form->addError(new FormError('Сервис временно недоступен'));
+            }
+        }
 
         if ($form->isSubmitted() && $form->isValid()) {
             $entityManager->persist($course);
@@ -139,10 +160,29 @@ final class CourseController extends AbstractController
 
     #[Route('/{id}/edit', name: 'app_course_edit', methods: ['GET', 'POST'])]
     #[IsGranted('ROLE_SUPER_ADMIN')]
-    public function edit(Request $request, Course $course, EntityManagerInterface $entityManager): Response
+    public function edit(Request $request, Course $course, EntityManagerInterface $entityManager, BillingCourseService $billingCourseService): Response
     {
+        $currentCode = $course->getSymbolicCode() ?? '';
         $form = $this->createForm(CourseType::class, $course);
         $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $user = $this->getUser();
+
+            if (!$user instanceof User) {
+                throw $this->createAccessDeniedException();
+            }
+
+            $this->normalizeBillingFields($course);
+
+            try {
+                $billingCourseService->updateCourse($user, $currentCode, $course);
+            } catch (BillingCourseSyncException $exception) {
+                $this->addBillingErrorsToForm($form, $exception);
+            } catch (BillingUnavailableException) {
+                $form->addError(new FormError('Сервис временно недоступен'));
+            }
+        }
 
         if ($form->isSubmitted() && $form->isValid()) {
             $entityManager->flush();
@@ -166,5 +206,32 @@ final class CourseController extends AbstractController
         }
 
         return $this->redirectToRoute('app_course_index', [], Response::HTTP_SEE_OTHER);
+    }
+
+    private function normalizeBillingFields(Course $course): void
+    {
+        if ($course->getType() === BillingCourseService::COURSE_TYPE_FREE) {
+            $course->setPrice(null);
+        }
+    }
+
+    private function addBillingErrorsToForm(\Symfony\Component\Form\FormInterface $form, BillingCourseSyncException $exception): void
+    {
+        $addedFieldError = false;
+
+        foreach ($exception->getFieldErrors() as $field => $messages) {
+            if (!$form->has($field)) {
+                continue;
+            }
+
+            foreach ($messages as $message) {
+                $form->get($field)->addError(new FormError($message));
+                $addedFieldError = true;
+            }
+        }
+
+        if (!$addedFieldError) {
+            $form->addError(new FormError($exception->getMessage()));
+        }
     }
 }

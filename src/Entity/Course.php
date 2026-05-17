@@ -9,6 +9,7 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
 use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 #[ORM\Entity(repositoryClass: CourseRepository::class)]
 #[UniqueEntity(fields: ['symbolic_code'], message: 'Символьный код курса должен быть уникальным.')]
@@ -38,6 +39,17 @@ class Course
     #[ORM\Column(type: Types::TEXT)]
     #[Assert\NotBlank(message: 'Укажите описание курса.')]
     private ?string $description = null;
+
+    #[ORM\Column(length: 16)]
+    #[Assert\NotBlank(message: 'Укажите тип курса.')]
+    #[Assert\Choice(
+        choices: ['free', 'rent', 'buy'],
+        message: 'Укажите корректный тип курса.',
+    )]
+    private ?string $type = null;
+
+    #[ORM\Column(type: Types::FLOAT, nullable: true)]
+    private ?float $price = null;
 
     /**
      * @var Collection<int, Lesson>
@@ -92,6 +104,30 @@ class Course
         return $this;
     }
 
+    public function getType(): ?string
+    {
+        return $this->type;
+    }
+
+    public function setType(?string $type): static
+    {
+        $this->type = $type;
+
+        return $this;
+    }
+
+    public function getPrice(): ?float
+    {
+        return $this->price;
+    }
+
+    public function setPrice(?float $price): static
+    {
+        $this->price = $price;
+
+        return $this;
+    }
+
     /**
      * @return Collection<int, Lesson>
      */
@@ -120,5 +156,27 @@ class Course
         }
 
         return $this;
+    }
+
+    #[Assert\Callback]
+    public function validateBillingFields(ExecutionContextInterface $context): void
+    {
+        if ($this->type === null || $this->type === 'free') {
+            return;
+        }
+
+        if ($this->price === null) {
+            $context->buildViolation('Укажите стоимость курса.')
+                ->atPath('price')
+                ->addViolation();
+
+            return;
+        }
+
+        if ($this->price <= 0) {
+            $context->buildViolation('Стоимость курса должна быть больше 0.')
+                ->atPath('price')
+                ->addViolation();
+        }
     }
 }

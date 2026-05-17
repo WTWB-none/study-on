@@ -71,11 +71,20 @@ class BillingClientMock extends BillingClient
         self::$transactions = [];
         self::$nextTransactionId = 1;
 
-        foreach (self::$users as $email => $user) {
-            self::$transactions[$email] = [
-                self::createTransaction('deposit', number_format($user['balance'], 2, '.', '')),
-            ];
-        }
+        self::$transactions['user@example.com'] = [
+            self::createTransaction('deposit', '299.40', null, null, '-30 days'),
+            self::createTransaction('payment', '79.00', 'project-management-essentials', null, '-20 days'),
+            self::createTransaction(
+                'payment',
+                '99.90',
+                'python-data-analysis',
+                (new \DateTimeImmutable('-3 days'))->format(DATE_ATOM),
+                '-10 days'
+            ),
+        ];
+        self::$transactions['super-admin@example.com'] = [
+            self::createTransaction('deposit', '999.99', null, null, '-30 days'),
+        ];
 
         self::$unavailablePaths = [];
     }
@@ -110,6 +119,22 @@ class BillingClientMock extends BillingClient
         self::$unavailablePaths[$path] = true;
     }
 
+    /**
+     * @param array{code: string, type: string, price?: string} $course
+     */
+    public static function seedCourse(array $course): void
+    {
+        self::$courses[$course['code']] = $course;
+    }
+
+    /**
+     * @return array{code: string, type: string, price?: string}|null
+     */
+    public static function courseByCode(string $code): ?array
+    {
+        return self::$courses[$code] ?? null;
+    }
+
     public function get(string $path, array $data = [], array $headers = []): mixed
     {
         if ([] !== $data) {
@@ -141,6 +166,8 @@ class BillingClientMock extends BillingClient
             $pathInfo['path'] === '/api/v1/auth/remember' => $this->authenticateRememberMe($data, $headers),
             $pathInfo['path'] === '/api/v1/token/refresh' => $this->refreshAccessToken($data),
             $pathInfo['path'] === '/api/v1/register' => $this->register($data),
+            $pathInfo['path'] === '/api/v1/courses' => $this->createCourse($data, $headers),
+            preg_match('#^/api/v1/courses/([^/]+)$#', $pathInfo['path'], $matches) === 1 => $this->updateCourse($matches[1], $data, $headers),
             preg_match('#^/api/v1/courses/([^/]+)/pay$#', $pathInfo['path'], $matches) === 1 => $this->payCourse($matches[1], $headers),
             default => ['message' => 'Unknown billing endpoint.'],
         };
@@ -380,11 +407,92 @@ class BillingClientMock extends BillingClient
         ];
     }
 
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, string> $headers
+     *
+     * @return array<string, mixed>
+     */
+    private function createCourse(array $data, array $headers): array
+    {
+        if (!$this->isAdmin($headers)) {
+            return ['message' => 'Administrator role required.'];
+        }
+
+        $validationErrors = $this->validateCoursePayload($data);
+        if ($validationErrors !== []) {
+            return [
+                'message' => 'Validation failed.',
+                'errors' => $validationErrors,
+            ];
+        }
+
+        $code = (string) $data['code'];
+
+        if (isset(self::$courses[$code])) {
+            return $this->courseCodeConflict();
+        }
+
+        self::$courses[$code] = $this->normalizeCoursePayload($data);
+
+        return ['success' => true];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, string> $headers
+     *
+     * @return array<string, mixed>
+     */
+    private function updateCourse(string $currentCode, array $data, array $headers): array
+    {
+        if (!$this->isAdmin($headers)) {
+            return ['message' => 'Administrator role required.'];
+        }
+
+        if (!isset(self::$courses[$currentCode])) {
+            return ['message' => 'Course not found.'];
+        }
+
+        $validationErrors = $this->validateCoursePayload($data);
+        if ($validationErrors !== []) {
+            return [
+                'message' => 'Validation failed.',
+                'errors' => $validationErrors,
+            ];
+        }
+
+        $newCode = (string) $data['code'];
+
+        if ($newCode !== $currentCode && isset(self::$courses[$newCode])) {
+            return $this->courseCodeConflict();
+        }
+
+        unset(self::$courses[$currentCode]);
+        self::$courses[$newCode] = $this->normalizeCoursePayload($data);
+
+        return ['success' => true];
+    }
+
     private function guardAvailability(string $path): void
     {
         if (isset(self::$unavailablePaths[$path])) {
             throw new BillingUnavailableException('Billing service is unavailable.');
         }
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function isAdmin(array $headers): bool
+    {
+        $email = $this->emailFromHeaders($headers);
+
+        if ($email === null) {
+            return false;
+        }
+
+        return in_array('ROLE_SUPER_ADMIN', self::$users[$email]['roles'] ?? [], true);
     }
 
     private function emailByToken(string $token): ?string
@@ -480,11 +588,19 @@ class BillingClientMock extends BillingClient
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 
-    private static function createTransaction(string $type, string $amount, ?string $courseCode = null, ?string $expiresAt = null): array
+    private static function createTransaction(
+        string $type,
+        string $amount,
+        ?string $courseCode = null,
+        ?string $expiresAt = null,
+        string $createdAtModifier = 'now',
+    ): array
     {
+        $createdAt = new \DateTimeImmutable($createdAtModifier);
+
         $transaction = [
             'id' => self::$nextTransactionId++,
-            'created_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            'created_at' => $createdAt->format(DATE_ATOM),
             'type' => $type,
             'amount' => $amount,
         ];
@@ -498,5 +614,91 @@ class BillingClientMock extends BillingClient
         }
 
         return $transaction;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{field: string, message: string}>
+     */
+    private function validateCoursePayload(array $data): array
+    {
+        $errors = [];
+        $type = $data['type'] ?? null;
+        $title = $data['title'] ?? null;
+        $code = $data['code'] ?? null;
+        $price = $data['price'] ?? null;
+
+        if (!is_string($type) || !in_array($type, ['free', 'rent', 'buy'], true)) {
+            $errors[] = [
+                'field' => 'type',
+                'message' => 'Course type must be one of: free, rent, buy.',
+            ];
+        }
+
+        if (!is_string($title) || $title === '') {
+            $errors[] = [
+                'field' => 'title',
+                'message' => 'Course title should not be blank.',
+            ];
+        }
+
+        if (!is_string($code) || $code === '') {
+            $errors[] = [
+                'field' => 'code',
+                'message' => 'Course code should not be blank.',
+            ];
+        }
+
+        if (is_string($type) && $type !== 'free') {
+            if (!is_float($price) && !is_int($price)) {
+                $errors[] = [
+                    'field' => 'price',
+                    'message' => 'Course price should not be blank for paid courses.',
+                ];
+            } elseif ((float) $price <= 0) {
+                $errors[] = [
+                    'field' => 'price',
+                    'message' => 'Course price should be greater than 0.',
+                ];
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array{code: string, type: string, price?: string}
+     */
+    private function normalizeCoursePayload(array $data): array
+    {
+        $course = [
+            'code' => (string) $data['code'],
+            'type' => (string) $data['type'],
+        ];
+
+        if ($course['type'] !== 'free') {
+            $course['price'] = number_format((float) $data['price'], 2, '.', '');
+        }
+
+        return $course;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function courseCodeConflict(): array
+    {
+        return [
+            'message' => 'Course with this code already exists.',
+            'errors' => [
+                [
+                    'field' => 'code',
+                    'message' => 'Course with this code already exists.',
+                ],
+            ],
+        ];
     }
 }
